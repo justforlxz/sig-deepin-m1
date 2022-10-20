@@ -1,0 +1,25 @@
+name: deepin m1 auto builder
+
+on:
+  push:
+    branches: ["master"]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Init
+        run: |
+          echo 'debconf debconf/frontend select Noninteractive' | sudo debconf-set-selections
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static systemd-container devscripts pbuilder debian-archive-keyring ca-certificates
+          sudo debootstrap --arch=arm64 --include=systemd-container --components=main,universe stable builder http://ftp.us.debian.org/debian
+          sudo systemd-nspawn --bind=$PWD/:/work -D ./builder uname -a
+      - name: Log
+        if: ${{ failure() }}
+        run: |
+          cat builder/debootstrap/debootstrap.log
