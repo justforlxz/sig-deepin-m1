@@ -12,14 +12,47 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v3
       - name: Init
         run: |
           echo 'debconf debconf/frontend select Noninteractive' | sudo debconf-set-selections
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static systemd-container devscripts pbuilder debian-archive-keyring ca-certificates
-          sudo debootstrap --arch=arm64 --include=systemd-container --components=main,universe stable builder http://ftp.us.debian.org/debian
-          sudo systemd-nspawn --bind=$PWD/:/work -D ./builder uname -a
+          sudo apt-get install -y qemu-user-static systemd-container pbuilder ca-certificates debian-archive-keyring libarchive-tools curl wget
+          #sudo debootstrap --arch=arm64 --include=systemd-container,curl,wget,ca-certificates,libarchive-tools --components=main,universe stable builder http://ftp.us.debian.org/debian
+          wget http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+      - name: Download files
+        run: |
+          mkdir builder
+          sudo tar -xzf ArchLinuxARM-aarch64-latest.tar.gz -C builder
+      - name: Install deps
+        run: |
+          sudo rm builder/dev/* || true
+          sudo rm builder/etc/resolv.conf || true
+          sudo tee builder/etc/resolv.conf <<< "1.1.1.1"
+          sudo systemd-nspawn -D ./builder pacman-key --init
+          sudo systemd-nspawn -D ./builder pacman-key --populate
+          sudo systemd-nspawn -D ./builder pacman -Syy arch-install-scripts wget curl libarchive --noconfirm
+      - name: Create v23 base
+        env:
+          DL: ${{ github.workspace }}/.github/builder/dl
+          ROOT: ${{ github.workspace }}/.github/builder/root
+        run: |
+          mkdir -p $DL
+          mkdir -p $ROOT
+          BASE_IMAGE_URL="https://github.com/deepin-community/sig-deepin-m1/releases/download/base/beige-arm64.tgz"
+          BASE_IMAGE="$(basename "$BASE_IMAGE_URL")"
+          wget -c "$BASE_IMAGE_URL" -O "$DL/$BASE_IMAGE.part"
+          mv "$DL/$BASE_IMAGE.part" "$DL/$BASE_IMAGE"
+          tar -xzf "$DL/$BASE_IMAGE" -C "$ROOT"
+      - name: Run Builder
+        run: |
+          sudo systemd-nspawn --bind=${{ github.workspace }} --chdir=${{ github.workspace }}/.github/builder/ -D ./builder ./build.sh
       - name: Log
         if: ${{ failure() }}
         run: |
-          cat builder/debootstrap/debootstrap.log
+          [ -f builder/debootstrap/debootstrap.log ] && cat builder/debootstrap/debootstrap.log
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: os
+          path: .github/builder/os/deepin-base.zip
